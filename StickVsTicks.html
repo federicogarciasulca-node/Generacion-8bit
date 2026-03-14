@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>STICK vs TICKS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0a0a0a;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:100vh; font-family:'Press Start 2P',monospace; color:#00ff41; overflow:hidden;
+  }
+  #title { font-size:15px; color:#ff003c; text-shadow:0 0 10px #ff003c; margin-bottom:4px; letter-spacing:2px; }
+  #hud {
+    display:flex; gap:18px; margin-bottom:4px; font-size:7px; align-items:center;
+  }
+  #lifebar-wrap {
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  #lifebar-container {
+    display:inline-block; width:100px; height:9px;
+    border:1px solid #00ff41; background:#111; border-radius:2px;
+  }
+  #lifebar {
+    display:block; height:100%; width:100%;
+    background:#00ff41; border-radius:2px; transition:width 0.2s,background 0.2s;
+  }
+  canvas { border:3px solid #00ff41; box-shadow:0 0 20px #00ff41; display:block; }
+  #controls { margin-top:5px; font-size:6px; color:#333; text-align:center; }
+  #overlay {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.88);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    z-index:10;
+  }
+  #overlay h2 { font-size:22px; color:#ff003c; text-shadow:0 0 15px #ff003c; text-align:center; }
+  #overlay p  { font-size:8px; color:#00ff41; text-align:center; line-height:2.2; }
+  #overlay .hs { font-size:9px; color:#ffff00; }
+  #overlay button {
+    font-family:'Press Start 2P',monospace; font-size:10px;
+    padding:10px 24px; background:transparent;
+    border:2px solid #00ff41; color:#00ff41; cursor:pointer;
+    text-shadow:0 0 8px #00ff41; box-shadow:0 0 10px #00ff41; transition:all 0.2s;
+    margin-top:4px;
+  }
+  #overlay button:hover { background:#00ff41; color:#000; }
+  #map-label { font-size:7px; color:#555; margin-bottom:2px; }
+  #wave-announce {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    font-family:'Press Start 2P',monospace; font-size:18px;
+    color:#00ffff; text-shadow:0 0 20px #00ffff;
+    pointer-events:none; opacity:0; transition:opacity 0.3s;
+    z-index:5;
+  }
+</style>
+</head>
+<body>
+<div id="title">🦟 STICK vs TICKS 🦟</div>
+<div id="maplabel">MAPA 1</div>
+<div id="hud">
+  <span>SCORE: <span id="score">0</span></span>
+  <span id="lifebar-wrap">VIDA: <span id="lifebar-container"><span id="lifebar"></span></span></span>
+  <span>OLA: <span id="level">1</span></span>
+  <span>MEJOR: <span id="hiscore">0</span></span>
+</div>
+<canvas id="c" width="560" height="480"></canvas>
+<div id="controls">WASD/FLECHAS=MOVER &nbsp;|&nbsp; ESPACIO=DISPARAR</div>
+<div id="wave-announce"></div>
+
+<div id="overlay">
+  <h2>STICK vs TICKS</h2>
+  <p>MATÁ LAS GARRAPATAS<br>SOBREVIVÍS A LAS OLAS<br>ENFRENTÁ AL BOSS</p>
+  <p class="hs">HIGHSCORE: <span id="hs-display">0</span></p>
+  <button id="startBtn">▶ JUGAR</button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const waveAnnounce = document.getElementById('wave-announce');
+const TILE=40, COLS=14, ROWS=12;
+
+// ── MAPAS ──────────────────────────────────────────────
+const MAPAS = [
+  { name:'LABERINTO CLASICO', data:[
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,1,0,0,0,0,0,0,1],
+    [1,0,1,1,0,0,0,0,1,1,0,1,0,1],
+    [1,0,1,0,0,1,1,0,0,0,0,1,0,1],
+    [1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+    [1,0,1,0,0,0,1,0,0,0,1,1,0,1],
+    [1,0,1,0,1,0,0,0,1,0,0,0,0,1],
+    [1,0,0,0,1,1,0,1,1,0,1,0,0,1],
+    [1,0,1,0,0,0,0,0,0,0,1,0,0,1],
+    [1,0,1,1,0,1,1,0,1,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,1,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ]},
+  { name:'BUNKER', data:[
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,1,1,1,0,1,1,0,1,1,1,0,1],
+    [1,0,1,0,0,0,0,1,0,0,0,1,0,1],
+    [1,0,1,0,1,1,0,1,0,1,0,1,0,1],
+    [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
+    [1,0,1,0,1,0,1,1,0,1,0,1,0,1],
+    [1,0,1,0,0,0,0,1,0,0,0,1,0,1],
+    [1,0,1,1,1,0,0,1,0,1,1,1,0,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ]},
+  { name:'CATACUMBAS', data:[
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,1,0,0,0,0,0,0,1,0,0,1],
+    [1,0,0,1,0,1,1,1,1,0,1,0,0,1],
+    [1,0,0,0,0,1,0,0,1,0,0,0,0,1],
+    [1,1,1,0,1,1,0,0,1,1,0,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,1,1,0,0,1,1,0,0,1,1,0,1],
+    [1,0,1,0,0,1,0,0,1,0,0,1,0,1],
+    [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
+    [1,1,0,1,1,0,1,1,0,1,1,0,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ]},
+  { name:'ARENA', data:[
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,1,0,0,0,0,0,0,1,0,0,1],
+    [1,0,1,1,1,0,0,0,0,1,1,1,0,1],
+    [1,0,0,1,0,0,0,0,0,0,1,0,0,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,1],
+    [1,0,0,1,0,0,0,0,0,0,1,0,0,1],
+    [1,0,1,1,1,0,0,0,0,1,1,1,0,1],
+    [1,0,0,1,0,0,0,0,0,0,1,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ]},
+];
+
+// ── AUDIO ──────────────────────────────────────────────
+let audioCtx=null;
+function getAC(){ if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+function tone(f,type,dur,vol=0.3,f2=null){
+  try{
+    const ac=getAC(),o=ac.createOscillator(),g=ac.createGain();
+    o.connect(g);g.connect(ac.destination);
+    o.type=type; o.frequency.setValueAtTime(f,ac.currentTime);
+    if(f2) o.frequency.exponentialRampToValueAtTime(f2,ac.currentTime+dur);
+    g.gain.setValueAtTime(vol,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+    o.start(ac.currentTime); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+const sfx={
+  shoot:   ()=>tone(880,'square',0.08,0.18,220),
+  die:     ()=>{ tone(200,'sawtooth',0.1,0.25,50); tone(150,'square',0.08,0.18,80); },
+  hit:     ()=>tone(100,'sawtooth',0.2,0.35,60),
+  wave:    ()=>{ setTimeout(()=>tone(523,'square',0.1,0.25),0); setTimeout(()=>tone(659,'square',0.1,0.25),100); setTimeout(()=>tone(784,'square',0.15,0.25),200); },
+  eat:     ()=>{ tone(600,'square',0.05,0.2); setTimeout(()=>tone(900,'square',0.05,0.2),60); },
+  boss:    ()=>{ [200,150,100,80].forEach((f,i)=>setTimeout(()=>tone(f,'sawtooth',0.25,0.4),i*200)); },
+  over:    ()=>{ [400,300,200,100].forEach((f,i)=>setTimeout(()=>tone(f,'sawtooth',0.3,0.35),i*200)); },
+  bossHit: ()=>tone(60,'sawtooth',0.15,0.5,30),
+  mapChange: ()=>{ [300,400,500,700].forEach((f,i)=>setTimeout(()=>tone(f,'square',0.12,0.2),i*100)); },
+};
+
+// ── ESTADO ────────────────────────────────────────────
+let MAPA=MAPAS[0].data, mapIdx=0, player, enemies=[], bullets=[], particles=[], foods=[], boss;
+let score=0, hp=100, maxHp=100, level=1, keys={}, gameState='idle', lastTime=null, shootCooldown=0, foodTimer=5, highscore=0;
+
+// FIX: flag para evitar que la lógica de "ola completa" se dispare múltiples veces
+let waveCooldown=0;
+
+// ── HIGHSCORE ─────────────────────────────────────────
+function loadHS(){ try{ return parseInt(localStorage.getItem('svt_hs')||'0'); }catch(e){return 0;} }
+function saveHS(s){ try{ localStorage.setItem('svt_hs',s); }catch(e){} }
+
+// ── HELPERS ───────────────────────────────────────────
+function isWall(x,y){
+  const c=Math.floor(x/TILE), r=Math.floor(y/TILE);
+  if(r<0||r>=ROWS||c<0||c>=COLS) return true;
+  return MAPA[r][c]===1;
+}
+function freeDirs(x,y,r){
+  return [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dy])=>{
+    const nx=x+dx*r*2.2, ny=y+dy*r*2.2;
+    return !isWall(nx-r,ny)&&!isWall(nx+r,ny)&&!isWall(nx,ny-r)&&!isWall(nx,ny+r);
+  });
+}
+function freeSpot(avoidR=2){
+  const spots=[];
+  for(let r=1;r<ROWS-1;r++) for(let c=1;c<COLS-1;c++)
+    if(MAPA[r][c]===0 && !(r<=avoidR&&c<=avoidR)) spots.push({r,c});
+  return spots[Math.floor(Math.random()*spots.length)];
+}
+function updateLifebar(){
+  const pct=Math.max(0,hp/maxHp*100);
+  const bar=document.getElementById('lifebar');
+  bar.style.width=pct+'%';
+  bar.style.background=pct>60?'#00ff41':pct>30?'#ffff00':'#ff003c';
+}
+function particles_spawn(x,y,color,n=10){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2;
+    particles.push({x,y,vx:Math.cos(a)*(50+Math.random()*80),vy:Math.sin(a)*(50+Math.random()*80),life:0.5+Math.random()*0.3,maxLife:0.8,color});
+  }
+}
+
+function showWaveAnnounce(text, color='#00ffff'){
+  waveAnnounce.textContent = text;
+  waveAnnounce.style.color = color;
+  waveAnnounce.style.textShadow = `0 0 20px ${color}`;
+  waveAnnounce.style.opacity = '1';
+  setTimeout(()=>{ waveAnnounce.style.opacity='0'; }, 1800);
+}
+
+// ── SPAWN ─────────────────────────────────────────────
+const FOODS=['🍕','🍔','🌮','🍜','🍩','🍎','🧀','🌭'];
+function spawnFood(){
+  const s=freeSpot(1);
+  if(s) foods.push({x:s.c*TILE+TILE/2,y:s.r*TILE+TILE/2,emoji:FOODS[Math.floor(Math.random()*FOODS.length)],life:9+Math.random()*4,pulse:0});
+}
+function spawnEnemies(){
+  const count=3+level*2;
+  for(let i=0;i<count;i++){
+    const s=freeSpot(2);
+    if(s) enemies.push({x:s.c*TILE+TILE/2,y:s.r*TILE+TILE/2,dx:1,dy:0,speed:55+level*12,changeDirTimer:Math.random()*1.5,legAnim:0,hit:0,lastX:null,stuckTimer:0});
+  }
+}
+function spawnBoss(){
+  if(gameState!=='playing') return;
+  const s=freeSpot(4);
+  boss={
+    x:s.c*TILE+TILE/2, y:s.r*TILE+TILE/2,
+    hp:20, maxHp:20,
+    dx:1, dy:0, speed:40,
+    changeDirTimer:0, legAnim:0, hit:0,
+    lastX:null, stuckTimer:0,
+    shootTimer:2, phase:1,
+    alive:true
+  };
+  sfx.boss();
+  showWaveAnnounce('⚠ BOSS ⚠', '#ff003c');
+}
+
+// ── INIT ──────────────────────────────────────────────
+function initGame(){
+  highscore=loadHS();
+  document.getElementById('hiscore').textContent=highscore;
+
+  mapIdx=0; MAPA=MAPAS[mapIdx].data;
+  document.getElementById('maplabel').textContent='MAPA: '+MAPAS[mapIdx].name;
+
+  score=0; hp=100; maxHp=100; level=1;
+  keys={}; bullets=[]; particles=[]; foods=[]; enemies=[]; boss=null;
+  shootCooldown=0; foodTimer=5; lastTime=0; waveCooldown=0;
+
+  player={x:TILE*1.5,y:TILE*1.5,dx:1,dy:0,speed:120,invincible:0,walkAnim:0};
+  spawnEnemies();
+  gameState='playing';
+  document.getElementById('score').textContent=0;
+  document.getElementById('level').textContent=1;
+  updateLifebar();
+}
+
+// ── DRAW HELPERS ──────────────────────────────────────
+function drawPlayer(x,y,dx,dy,anim,alpha){
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.strokeStyle='#00ff41'; ctx.shadowColor='#00ff41'; ctx.shadowBlur=6;
+  ctx.lineWidth=2; ctx.lineCap='round';
+  ctx.beginPath(); ctx.arc(x,y-10,6,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x,y-4); ctx.lineTo(x,y+8); ctx.stroke();
+  const ang=Math.atan2(dy,dx);
+  ctx.beginPath(); ctx.moveTo(x-4,y+1); ctx.lineTo(x+Math.cos(ang)*9,y+Math.sin(ang)*9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+4,y+1); ctx.lineTo(x+Math.cos(ang)*7,y+Math.sin(ang)*7); ctx.stroke();
+  const sw=Math.sin(anim*10)*5;
+  ctx.beginPath(); ctx.moveTo(x,y+8); ctx.lineTo(x-5+sw,y+18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x,y+8); ctx.lineTo(x+5-sw,y+18); ctx.stroke();
+  ctx.restore();
+}
+
+function drawTick(x,y,anim,hitFlash,size=1){
+  ctx.save();
+  ctx.strokeStyle=hitFlash>0?'#fff':'#ff4444';
+  ctx.fillStyle=hitFlash>0?'#fff':'#aa0000';
+  ctx.lineWidth=1.5*size; ctx.lineCap='round';
+  ctx.shadowColor='#ff0000'; ctx.shadowBlur=4;
+  ctx.beginPath(); ctx.ellipse(x,y,9*size,7*size,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  const w=Math.sin(anim*14)*3*size;
+  [[-9,-5,-16,-11+w],[-9,-1,-16,-3+w],[-9,2,-16,5-w],[-9,5,-15,11-w],
+   [9,-5,16,-11+w],[9,-1,16,-3+w],[9,2,16,5-w],[9,5,15,11-w]
+  ].forEach(([x1,y1,x2,y2])=>{
+    ctx.beginPath(); ctx.moveTo(x+x1*size,y+y1*size); ctx.lineTo(x+x2*size,y+y2*size); ctx.stroke();
+  });
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#ffff00';
+  ctx.beginPath(); ctx.arc(x-3*size,y-2*size,2*size,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+3*size,y-2*size,2*size,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000';
+  ctx.beginPath(); ctx.arc(x-3*size,y-2*size,1*size,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+3*size,y-2*size,1*size,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawBoss(b){
+  ctx.save();
+  const pulse=1+Math.sin(b.legAnim*3)*0.08;
+  const hpPct=b.hp/b.maxHp;
+  ctx.strokeStyle=b.hit>0?'#fff':hpPct>0.5?'#ff4444':'#ff0000';
+  ctx.fillStyle=b.hit>0?'#ff8888':hpPct>0.5?'#880000':'#cc0000';
+  ctx.lineWidth=3; ctx.shadowColor='#ff0000'; ctx.shadowBlur=15;
+  ctx.beginPath(); ctx.ellipse(b.x,b.y,22*pulse,18*pulse,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+
+  const w=Math.sin(b.legAnim*10)*5;
+  ctx.lineWidth=2;
+  [[-22,-10,-38,-18+w],[-22,-4,-38,-6+w],[-22,3,-38,7-w],[-22,10,-37,18-w],[-22,14,-36,24-w],[-22,17,-34,28-w],
+   [22,-10,38,-18+w],[22,-4,38,-6+w],[22,3,38,7-w],[22,10,37,18-w],[22,14,36,24-w],[22,17,34,28-w]
+  ].forEach(([x1,y1,x2,y2])=>{
+    ctx.beginPath(); ctx.moveTo(b.x+x1,b.y+y1); ctx.lineTo(b.x+x2,b.y+y2); ctx.stroke();
+  });
+
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#ffff00';
+  ctx.beginPath(); ctx.arc(b.x-8,b.y-5,5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(b.x+8,b.y-5,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000';
+  ctx.beginPath(); ctx.arc(b.x-8,b.y-5,2.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(b.x+8,b.y-5,2.5,0,Math.PI*2); ctx.fill();
+
+  ctx.strokeStyle='#ffff00'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(b.x,b.y+4,8,0.2,Math.PI-0.2); ctx.stroke();
+  ctx.fillStyle='#ffff00';
+  ctx.beginPath(); ctx.moveTo(b.x-6,b.y+8); ctx.lineTo(b.x-4,b.y+13); ctx.lineTo(b.x-2,b.y+8); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(b.x+2,b.y+8); ctx.lineTo(b.x+4,b.y+13); ctx.lineTo(b.x+6,b.y+8); ctx.fill();
+
+  const bw=120, bh=8;
+  const bx=b.x-bw/2, by=b.y-36;
+  ctx.fillStyle='#330000'; ctx.fillRect(bx,by,bw,bh);
+  ctx.fillStyle=hpPct>0.5?'#ff4444':hpPct>0.25?'#ff8800':'#ff0000';
+  ctx.fillRect(bx,by,bw*hpPct,bh);
+  ctx.strokeStyle='#ff4444'; ctx.lineWidth=1;
+  ctx.strokeRect(bx,by,bw,bh);
+  ctx.font='5px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.textAlign='center';
+  ctx.fillText('BOSS',b.x,by-3);
+
+  ctx.restore();
+}
+
+// ── MOVE ENTITY ───────────────────────────────────────
+function moveEntity(e, dt, r, isPlayer=false){
+  e.changeDirTimer-=dt;
+  if(!e.lastX){e.lastX=e.x;e.lastY=e.y;e.stuckTimer=0;}
+  e.stuckTimer+=dt;
+  if(e.stuckTimer>0.15){
+    if(Math.hypot(e.x-e.lastX,e.y-e.lastY)<1.5){
+      e.x=Math.round(e.x/TILE)*TILE+TILE/2;
+      e.y=Math.round(e.y/TILE)*TILE+TILE/2;
+      const fd=freeDirs(e.x,e.y,r);
+      if(fd.length>0){const d=fd[Math.floor(Math.random()*fd.length)];e.dx=d[0];e.dy=d[1];}
+      e.changeDirTimer=0.2+Math.random()*0.3;
+    }
+    e.lastX=e.x;e.lastY=e.y;e.stuckTimer=0;
+  }
+  if(e.changeDirTimer<=0){
+    const fd=freeDirs(e.x,e.y,r);
+    if(fd.length>0){
+      if(Math.random()<0.7){
+        const tx=player.x-e.x, ty=player.y-e.y;
+        fd.sort((a,b)=>(b[0]*tx+b[1]*ty)-(a[0]*tx+a[1]*ty));
+        e.dx=fd[0][0]; e.dy=fd[0][1];
+      } else {
+        const d=fd[Math.floor(Math.random()*fd.length)];e.dx=d[0];e.dy=d[1];
+      }
+    }
+    e.changeDirTimer=0.2+Math.random()*0.5;
+  }
+  const nx=e.x+e.dx*e.speed*dt, ny=e.y+e.dy*e.speed*dt;
+  const canX=!isWall(nx-r,e.y)&&!isWall(nx+r,e.y);
+  const canY=!isWall(e.x,ny-r)&&!isWall(e.x,ny+r);
+  if(canX)e.x=nx; else{e.dx*=-1;e.changeDirTimer=0;}
+  if(canY)e.y=ny; else{e.dy*=-1;e.changeDirTimer=0;}
+  e.legAnim+=dt;
+  if(e.hit>0)e.hit-=dt;
+}
+
+// ── UPDATE ────────────────────────────────────────────
+function update(dt){
+  if(gameState!=='playing') return;
+
+  // Cooldown entre olas (evita que se dispare múltiples frames seguidos)
+  if(waveCooldown>0){ waveCooldown-=dt; return; }
+
+  // Jugador
+  let pdx=0,pdy=0;
+  if(keys['ArrowLeft']||keys['a'])pdx=-1;
+  if(keys['ArrowRight']||keys['d'])pdx=1;
+  if(keys['ArrowUp']||keys['w'])pdy=-1;
+  if(keys['ArrowDown']||keys['s'])pdy=1;
+  if(pdx||pdy){
+    player.dx=pdx; player.dy=pdy; player.walkAnim+=dt;
+    const len=Math.sqrt(pdx*pdx+pdy*pdy);
+    const nx=player.x+(pdx/len)*player.speed*dt;
+    const ny=player.y+(pdy/len)*player.speed*dt;
+    const r=10;
+    if(!isWall(nx-r,player.y)&&!isWall(nx+r,player.y)) player.x=nx;
+    if(!isWall(player.x,ny-r)&&!isWall(player.x,ny+r)) player.y=ny;
+  }
+  if(player.invincible>0) player.invincible-=dt;
+  if(shootCooldown>0) shootCooldown-=dt;
+
+  // Disparo
+  if(keys[' ']&&shootCooldown<=0){
+    const len=Math.sqrt(player.dx*player.dx+player.dy*player.dy);
+    bullets.push({x:player.x,y:player.y,dx:player.dx/len,dy:player.dy/len,speed:320,life:1.0,fromBoss:false});
+    shootCooldown=0.22; sfx.shoot();
+  }
+
+  // Balas del boss
+  if(boss&&boss.alive){
+    boss.shootTimer-=dt;
+    if(boss.shootTimer<=0){
+      const dirs=boss.phase===1?[[1,0],[-1,0],[0,1],[0,-1]]:[[1,0],[-1,0],[0,1],[0,-1],[0.7,0.7],[-0.7,0.7],[0.7,-0.7],[-0.7,-0.7]];
+      dirs.forEach(([dx,dy])=>{
+        const len=Math.sqrt(dx*dx+dy*dy);
+        bullets.push({x:boss.x,y:boss.y,dx:dx/len,dy:dy/len,speed:160,life:1.5,fromBoss:true});
+      });
+      boss.shootTimer=boss.phase===1?2.5:1.8;
+    }
+  }
+
+  // Mover balas
+  bullets=bullets.filter(b=>{
+    b.life-=dt;
+    b.x+=b.dx*b.speed*dt; b.y+=b.dy*b.speed*dt;
+    if(isWall(b.x,b.y)){particles_spawn(b.x,b.y,'#ffff00',5);return false;}
+
+    if(!b.fromBoss){
+      for(let i=enemies.length-1;i>=0;i--){
+        if(Math.hypot(b.x-enemies[i].x,b.y-enemies[i].y)<14){
+          particles_spawn(enemies[i].x,enemies[i].y,'#ff4444');
+          enemies.splice(i,1); score+=100; sfx.die();
+          document.getElementById('score').textContent=score;
+          return false;
+        }
+      }
+      if(boss&&boss.alive&&Math.hypot(b.x-boss.x,b.y-boss.y)<26){
+        boss.hp--; boss.hit=0.15; sfx.bossHit();
+        particles_spawn(boss.x,boss.y,'#ff8888',6);
+        if(boss.hp<=5) boss.phase=2;
+        if(boss.hp<=0){
+          boss.alive=false;
+          score+=2000; sfx.wave();
+          particles_spawn(boss.x,boss.y,'#ffff00',25);
+          document.getElementById('score').textContent=score;
+          boss=null;
+        }
+        return false;
+      }
+    } else {
+      if(player.invincible<=0&&Math.hypot(b.x-player.x,b.y-player.y)<14){
+        hp-=20; player.invincible=1.5; sfx.hit();
+        particles_spawn(player.x,player.y,'#00ff41');
+        updateLifebar();
+        if(hp<=0){ endGame(); }
+        return false;
+      }
+    }
+    return b.life>0;
+  });
+
+  // Mover enemigos
+  enemies.forEach(e=>moveEntity(e,dt,10));
+
+  // Mover boss
+  if(boss&&boss.alive) moveEntity(boss,dt,20);
+
+  // Colisión jugador-enemigo normal
+  if(player.invincible<=0){
+    for(const e of enemies){
+      if(Math.hypot(player.x-e.x,player.y-e.y)<18){
+        hp-=34; player.invincible=2; sfx.hit();
+        particles_spawn(player.x,player.y,'#00ff41'); updateLifebar();
+        if(hp<=0){endGame();return;}
+        break;
+      }
+    }
+    if(boss&&boss.alive&&Math.hypot(player.x-boss.x,player.y-boss.y)<30){
+      hp-=50; player.invincible=2.5; sfx.hit();
+      particles_spawn(player.x,player.y,'#00ff41'); updateLifebar();
+      if(hp<=0){endGame();return;}
+    }
+  }
+
+  // Comida
+  foodTimer-=dt;
+  if(foodTimer<=0&&hp<maxHp*0.5&&foods.length<2){spawnFood();foodTimer=4+Math.random()*4;}
+  foods=foods.filter(f=>{
+    f.life-=dt; f.pulse+=dt*4;
+    if(Math.hypot(player.x-f.x,player.y-f.y)<18){
+      hp=Math.min(maxHp,hp+35); updateLifebar();
+      particles_spawn(f.x,f.y,'#ffff00'); sfx.eat();
+      return false;
+    }
+    return f.life>0;
+  });
+
+  // ── SIGUIENTE OLA ─────────────────────────────────
+  // FIX: Solo entra si no hay enemigos NI boss vivo, y con cooldown para evitar re-entrada
+  if(enemies.length===0 && (!boss || !boss.alive)){
+    level++;
+    document.getElementById('level').textContent=level;
+    sfx.wave();
+    particles_spawn(player.x,player.y,'#00ffff',15);
+
+    // FIX: Cambio de mapa correcto — se basa en level ya incrementado
+    // Mapa 1: olas 1-3, Mapa 2: olas 4-6, Mapa 3: olas 7-9, Mapa 4: olas 10+
+    const newMapIdx = Math.min(MAPAS.length-1, Math.floor((level-1)/3));
+    if(newMapIdx !== mapIdx){
+      mapIdx = newMapIdx;
+      MAPA = MAPAS[mapIdx].data;
+      document.getElementById('maplabel').textContent = 'MAPA: '+MAPAS[mapIdx].name;
+      sfx.mapChange();
+      showWaveAnnounce('MAPA: '+MAPAS[mapIdx].name, '#00ffff');
+    } else {
+      showWaveAnnounce('OLA '+level, '#00ff41');
+    }
+
+    // FIX: waveCooldown bloquea el update() durante 1.2s
+    // En ese tiempo spawnamos enemigos pero no volvemos a entrar en esta lógica
+    waveCooldown = 1.2;
+
+    // Boss cada 5 olas — spawneamos al final del cooldown
+    if(level % 5 === 0){
+      setTimeout(()=>{ spawnBoss(); }, 1400);
+    } else {
+      spawnEnemies();
+    }
+  }
+
+  // Partículas
+  particles=particles.filter(p=>{
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; return p.life>0;
+  });
+}
+
+// ── DRAW ──────────────────────────────────────────────
+function draw(){
+  if(!MAPA) return;
+  ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    if(MAPA[r][c]===1){
+      ctx.fillStyle='#152a15'; ctx.fillRect(c*TILE,r*TILE,TILE,TILE);
+      ctx.strokeStyle='#00ff41'; ctx.lineWidth=0.5;
+      ctx.strokeRect(c*TILE+0.5,r*TILE+0.5,TILE-1,TILE-1);
+    }
+  }
+
+  foods.forEach(f=>{
+    ctx.save();
+    const scale=1+Math.sin(f.pulse)*0.15;
+    ctx.font=`${Math.round(22*scale)}px serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    if(f.life>2||Math.floor(f.life*6)%2===0){
+      ctx.shadowColor='#ffff00'; ctx.shadowBlur=12;
+      ctx.fillText(f.emoji,f.x,f.y);
+    }
+    ctx.restore();
+  });
+
+  bullets.forEach(b=>{
+    ctx.save();
+    ctx.fillStyle=b.fromBoss?'#ff4444':'#ffff00';
+    ctx.shadowColor=b.fromBoss?'#ff0000':'#ffff00'; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.fromBoss?5:4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  enemies.forEach(e=>drawTick(e.x,e.y,e.legAnim,e.hit));
+  if(boss&&boss.alive) drawBoss(boss);
+
+  const alpha=player.invincible>0?(Math.sin(player.invincible*20)>0?0.25:1):1;
+  drawPlayer(player.x,player.y,player.dx,player.dy,player.walkAnim,alpha);
+
+  particles.forEach(p=>{
+    ctx.save(); ctx.globalAlpha=p.life/p.maxLife;
+    ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=5;
+    ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  // Mostrar "PREPARATE..." durante waveCooldown
+  if(waveCooldown>0.3){
+    ctx.save();
+    ctx.font='10px "Press Start 2P"';
+    ctx.fillStyle='#ffff00'; ctx.textAlign='center';
+    ctx.shadowColor='#ffff00'; ctx.shadowBlur=10;
+    ctx.fillText('PREPARATE...', canvas.width/2, canvas.height/2);
+    ctx.restore();
+  }
+}
+
+// ── GAME OVER ─────────────────────────────────────────
+function endGame(){
+  gameState='gameover';
+  if(score>highscore){ highscore=score; saveHS(score); }
+  sfx.over();
+  const isNew=score>=highscore&&score>0;
+  overlay.innerHTML=`
+    <h2>${isNew?'🏆 NUEVO RECORD 🏆':'GAME OVER'}</h2>
+    <p>SCORE: ${score}<br>OLA ALCANZADA: ${level}<br>MAPA: ${MAPAS[mapIdx].name}</p>
+    <p class="hs">HIGHSCORE: ${highscore}</p>
+    <button onclick="startGame()">▶ REINTENTAR</button>
+  `;
+  overlay.style.display='flex';
+}
+
+function startGame(){
+  overlay.style.display='none';
+  initGame();
+}
+
+// ── INPUT ─────────────────────────────────────────────
+document.addEventListener('keydown',e=>{keys[e.key]=true;if(e.key===' ')e.preventDefault();});
+document.addEventListener('keyup',e=>{keys[e.key]=false;});
+document.getElementById('startBtn').addEventListener('click',startGame);
+
+document.getElementById('hs-display').textContent=loadHS();
+
+// ── LOOP ──────────────────────────────────────────────
+function loop(ts){
+  if(!lastTime || gameState==='idle') { lastTime=ts; requestAnimationFrame(loop); return; }
+  const dt=Math.min((ts-lastTime)/1000,0.05);
+  lastTime=ts;
+  if(gameState==='playing'){update(dt);draw();}
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
